@@ -3,10 +3,14 @@
 // table exists. Uses Node's built-in `node:sqlite` module, so there is
 // no native module to compile — it just works out of the box.
 
+const fs = require("node:fs");
 const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 
-const dbPath = path.join(__dirname, "data", "expenses.db");
+const dataDir = path.join(__dirname, "data");
+fs.mkdirSync(dataDir, { recursive: true });
+
+const dbPath = path.join(dataDir, "expenses.db");
 const db = new DatabaseSync(dbPath);
 
 db.exec(`
