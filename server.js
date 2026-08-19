@@ -19,7 +19,7 @@ const ALLOWED_CATEGORIES = [
 ];
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "..", "frontend")));
+app.use(express.static(path.join(__dirname, "public")));
 
 // GET /api/expenses - list all expenses, most recent first
 app.get("/api/expenses", (req, res) => {
