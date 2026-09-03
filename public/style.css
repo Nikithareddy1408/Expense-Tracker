@@ -69,8 +69,14 @@ body {
 }
 
 .subtitle {
-  margin: 0 0 28px;
+  margin: 0 0 4px;
   color: var(--text-secondary);
+}
+
+.sync-status {
+  margin: 0 0 28px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .layout {
@@ -154,6 +160,74 @@ button[type="submit"]:hover {
   margin: -4px 0 10px;
 }
 
+.auto-cat-hint {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.cards-section {
+  grid-column: 1 / -1;
+}
+
+.section-hint {
+  margin: -8px 0 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.cards-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.card-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.card-row:last-child {
+  border-bottom: none;
+}
+
+.card-name {
+  font-weight: 600;
+  flex: 1;
+}
+
+.sync-msg {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.sync-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sync-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sync-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .stat-tile {
   display: flex;
   flex-direction: column;
@@ -197,6 +271,76 @@ button[type="submit"]:hover {
   font-variant-numeric: tabular-nums;
 }
 
+.list-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.list-card-header h2 {
+  margin: 0;
+}
+
+.export-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.export-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.filter-search {
+  flex: 1 1 220px;
+}
+
+.filter-field {
+  margin-bottom: 0;
+  min-width: 130px;
+}
+
+.filter-field label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.filter-clear {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 9px 4px;
+}
+
+.filter-clear:hover {
+  color: var(--accent);
+}
+
 .expense-list {
   list-style: none;
   margin: 0;
@@ -207,7 +351,7 @@ button[type="submit"]:hover {
 
 .expense-item {
   display: grid;
-  grid-template-columns: auto 100px 1fr auto auto;
+  grid-template-columns: auto 100px 1fr auto auto auto;
   align-items: center;
   gap: 14px;
   padding: 12px 4px;
@@ -222,6 +366,12 @@ button[type="submit"]:hover {
   width: 10px;
   height: 10px;
   border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cat-icon {
+  font-size: 18px;
+  line-height: 1;
   flex-shrink: 0;
 }
 
@@ -242,6 +392,46 @@ button[type="submit"]:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.expense-card {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.badge-pending {
+  background: rgba(237, 161, 0, 0.16);
+  color: #9a6b00;
+}
+
+.badge-posted {
+  background: rgba(27, 175, 122, 0.16);
+  color: #12805c;
+}
+
+@media (prefers-color-scheme: dark) {
+  .badge-pending {
+    background: rgba(201, 133, 0, 0.22);
+    color: #eda100;
+  }
+  .badge-posted {
+    background: rgba(25, 158, 112, 0.22);
+    color: #3fd6a3;
+  }
 }
 
 .expense-date {
@@ -286,10 +476,27 @@ button[type="submit"]:hover {
   .layout {
     grid-template-columns: 1fr;
   }
+  .list-card-header {
+    flex-wrap: wrap;
+  }
+  .card-row {
+    flex-wrap: wrap;
+  }
+  .sync-msg {
+    flex-basis: 100%;
+  }
+  .filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .filter-field {
+    min-width: 0;
+  }
   .expense-item {
     grid-template-columns: auto 80px 1fr;
     row-gap: 4px;
   }
+  .status-badge,
   .expense-date,
   .delete-btn {
     grid-column: 2 / -1;

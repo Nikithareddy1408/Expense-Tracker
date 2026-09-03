@@ -12,6 +12,7 @@
     <header class="page-header">
       <h1>Expense Tracker</h1>
       <p class="subtitle">Track what you spend, see where it goes.</p>
+      <p class="sync-status" id="sync-status">Syncing…</p>
     </header>
 
     <main class="layout">
@@ -24,8 +25,8 @@
           </div>
 
           <div class="field">
-            <label for="category">Category</label>
-            <select id="category" name="category" required></select>
+            <label for="card">Card</label>
+            <select id="card" name="card" required></select>
           </div>
 
           <div class="field">
@@ -34,8 +35,14 @@
           </div>
 
           <div class="field">
-            <label for="note">Note <span class="optional">(optional)</span></label>
-            <input type="text" id="note" name="note" placeholder="e.g. Groceries at Trader Joe's" maxlength="200" />
+            <label for="note">Merchant / Note <span class="optional">(optional)</span></label>
+            <input type="text" id="note" name="note" placeholder="e.g. Starbucks" maxlength="200" />
+          </div>
+
+          <div class="field">
+            <label for="category">Category</label>
+            <select id="category" name="category" required></select>
+            <span class="auto-cat-hint" id="auto-cat-hint" hidden>Auto-categorized from merchant — change it if that's wrong</span>
           </div>
 
           <p id="form-error" class="form-error" role="alert" hidden></p>
@@ -68,9 +75,50 @@
         </table>
       </section>
 
+      <section class="card cards-section" aria-labelledby="cards-heading">
+        <h2 id="cards-heading">Cards</h2>
+        <p class="section-hint">Simulate new activity syncing in from a card, like a real bank feed.</p>
+        <ul class="cards-list" id="cards-list"></ul>
+      </section>
+
       <section class="card list-card" aria-labelledby="list-heading">
-        <h2 id="list-heading">All expenses</h2>
+        <div class="list-card-header">
+          <h2 id="list-heading">All expenses</h2>
+          <button type="button" id="export-btn" class="export-btn">Download Statement</button>
+        </div>
+
+        <div class="filter-bar" role="search" aria-label="Filter expenses">
+          <input type="search" id="filter-search" class="filter-search" placeholder="Search merchant or note…" aria-label="Search merchant or note" />
+
+          <div class="field filter-field">
+            <label for="filter-date-from">From</label>
+            <input type="date" id="filter-date-from" aria-label="From date" />
+          </div>
+
+          <div class="field filter-field">
+            <label for="filter-date-to">To</label>
+            <input type="date" id="filter-date-to" aria-label="To date" />
+          </div>
+
+          <div class="field filter-field">
+            <label for="filter-category">Category</label>
+            <select id="filter-category" aria-label="Filter by category">
+              <option value="">All categories</option>
+            </select>
+          </div>
+
+          <div class="field filter-field">
+            <label for="filter-card">Card</label>
+            <select id="filter-card" aria-label="Filter by card">
+              <option value="">All cards</option>
+            </select>
+          </div>
+
+          <button type="button" id="filter-clear" class="filter-clear">Clear filters</button>
+        </div>
+
         <p id="list-empty" class="empty-state" hidden>No expenses recorded yet.</p>
+        <p id="list-no-match" class="empty-state" hidden>No expenses match these filters.</p>
         <ul class="expense-list" id="expense-list"></ul>
       </section>
     </main>

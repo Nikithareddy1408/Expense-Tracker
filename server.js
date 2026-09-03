@@ -18,6 +18,15 @@ const ALLOWED_CATEGORIES = [
   "Other",
 ];
 
+// A fixed set of demo cards, since this project doesn't have real linked
+// bank accounts — just enough variety for the card filter to be useful.
+const ALLOWED_CARDS = [
+  "Visa •••• 4242",
+  "Mastercard •••• 8891",
+  "Amex •••• 1005",
+  "Cash",
+];
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -25,7 +34,7 @@ app.use(express.static(path.join(__dirname, "public")));
 app.get("/api/expenses", (req, res) => {
   const rows = db
     .prepare(
-      "SELECT id, amount, category, date, note, created_at FROM expenses ORDER BY date DESC, id DESC"
+      "SELECT id, amount, category, date, note, card, created_at FROM expenses ORDER BY date DESC, id DESC"
     )
     .all();
   res.json(rows);
@@ -33,7 +42,7 @@ app.get("/api/expenses", (req, res) => {
 
 // POST /api/expenses - add a new expense
 app.post("/api/expenses", (req, res) => {
-  const { amount, category, date, note } = req.body ?? {};
+  const { amount, category, date, note, card } = req.body ?? {};
 
   const parsedAmount = Number(amount);
   if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
@@ -49,14 +58,20 @@ app.post("/api/expenses", (req, res) => {
   if (!date || Number.isNaN(Date.parse(date))) {
     return res.status(400).json({ error: "date must be a valid date" });
   }
+  const resolvedCard = card || "Cash";
+  if (!ALLOWED_CARDS.includes(resolvedCard)) {
+    return res.status(400).json({
+      error: `card must be one of: ${ALLOWED_CARDS.join(", ")}`,
+    });
+  }
 
   const stmt = db.prepare(
-    "INSERT INTO expenses (amount, category, date, note) VALUES (?, ?, ?, ?)"
+    "INSERT INTO expenses (amount, category, date, note, card) VALUES (?, ?, ?, ?, ?)"
   );
-  const result = stmt.run(parsedAmount, category, date, note ?? null);
+  const result = stmt.run(parsedAmount, category, date, note ?? null, resolvedCard);
 
   const created = db
-    .prepare("SELECT id, amount, category, date, note, created_at FROM expenses WHERE id = ?")
+    .prepare("SELECT id, amount, category, date, note, card, created_at FROM expenses WHERE id = ?")
     .get(result.lastInsertRowid);
 
   res.status(201).json(created);
@@ -94,6 +109,10 @@ app.get("/api/summary", (req, res) => {
 
 app.get("/api/categories", (req, res) => {
   res.json(ALLOWED_CATEGORIES);
+});
+
+app.get("/api/cards", (req, res) => {
+  res.json(ALLOWED_CARDS);
 });
 
 app.listen(PORT, () => {

@@ -13,18 +13,136 @@ const CATEGORY_COLOR_VAR = {
   Other: "--cat-other",
 };
 
+// One emoji per category, shown next to each transaction as a lightweight
+// stand-in for a proper icon set.
+const CATEGORY_ICON = {
+  Food: "☕",
+  Transport: "🚗",
+  Rent: "🏠",
+  Entertainment: "🎬",
+  Other: "🛍️",
+};
+
+// A transaction is treated as "Pending" if its date is today or yesterday,
+// and "Posted" once it's 2+ days old — mimicking how real card transactions
+// take a day or two to settle.
+const PENDING_WINDOW_DAYS = 1;
+
+// Rule-based merchant -> category matching, the same "bank auto-categorize"
+// logic used both when typing a merchant into the add-expense form and when
+// simulating new synced-in card activity. Keyword lists are checked in
+// order, first match wins.
+const MERCHANT_CATEGORY_RULES = [
+  {
+    category: "Food",
+    keywords: [
+      "starbucks", "coffee", "chipotle", "mcdonald", "trader joe",
+      "whole foods", "doordash", "grubhub", "pizza", "cafe", "restaurant",
+      "deli", "bakery", "uber eats",
+    ],
+  },
+  {
+    category: "Transport",
+    keywords: [
+      "uber", "lyft", "shell", "chevron", "exxon", "parking", "transit",
+      "metro", "delta", "united airlines", "gas station", "car rental",
+    ],
+  },
+  {
+    category: "Entertainment",
+    keywords: [
+      "netflix", "spotify", "hulu", "amc", "movie", "cinema", "steam",
+      "concert", "theater", "ticketmaster",
+    ],
+  },
+  {
+    category: "Rent",
+    keywords: ["rent", "landlord", "property management", "apartments"],
+  },
+  {
+    category: "Other",
+    keywords: [
+      "amazon", "target", "walmart", "pharmacy", "cvs", "walgreens",
+      "gym", "subscription",
+    ],
+  },
+];
+
+function categorizeMerchant(text) {
+  const lower = text.toLowerCase();
+  for (const rule of MERCHANT_CATEGORY_RULES) {
+    if (rule.keywords.some((kw) => lower.includes(kw))) return rule.category;
+  }
+  return null;
+}
+
+// A pool of realistic merchant names for "Simulate Card Sync", each one
+// deliberately chosen to match a keyword above so it lands in the right
+// category, plus a plausible amount range for that kind of purchase.
+const SYNC_MERCHANT_POOL = [
+  { name: "Starbucks", minAmount: 3.5, maxAmount: 9 },
+  { name: "Chipotle", minAmount: 8, maxAmount: 16 },
+  { name: "Trader Joe's", minAmount: 15, maxAmount: 65 },
+  { name: "Whole Foods Market", minAmount: 20, maxAmount: 90 },
+  { name: "DoorDash", minAmount: 12, maxAmount: 40 },
+  { name: "Uber", minAmount: 8, maxAmount: 35 },
+  { name: "Lyft", minAmount: 8, maxAmount: 30 },
+  { name: "Shell Gas Station", minAmount: 25, maxAmount: 60 },
+  { name: "Delta Air Lines", minAmount: 120, maxAmount: 450 },
+  { name: "Netflix", minAmount: 9, maxAmount: 20 },
+  { name: "Spotify", minAmount: 9, maxAmount: 15 },
+  { name: "AMC Theatres", minAmount: 12, maxAmount: 45 },
+  { name: "Steam", minAmount: 5, maxAmount: 60 },
+  { name: "Amazon", minAmount: 10, maxAmount: 120 },
+  { name: "Target", minAmount: 15, maxAmount: 85 },
+  { name: "CVS Pharmacy", minAmount: 6, maxAmount: 40 },
+];
+
+function randomMerchant() {
+  return SYNC_MERCHANT_POOL[Math.floor(Math.random() * SYNC_MERCHANT_POOL.length)];
+}
+
+function randomAmount(min, max) {
+  return Number((Math.random() * (max - min) + min).toFixed(2));
+}
+
+function todayDateStr() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 const form = document.getElementById("expense-form");
 const categorySelect = document.getElementById("category");
+const cardSelect = document.getElementById("card");
 const dateInput = document.getElementById("date");
+const noteInput = document.getElementById("note");
+const autoCatHint = document.getElementById("auto-cat-hint");
+const cardsListEl = document.getElementById("cards-list");
 const formError = document.getElementById("form-error");
 const totalSpendingEl = document.getElementById("total-spending");
 const expenseListEl = document.getElementById("expense-list");
 const listEmptyEl = document.getElementById("list-empty");
+const listNoMatchEl = document.getElementById("list-no-match");
 const chartEmptyEl = document.getElementById("chart-empty");
 const breakdownBody = document.getElementById("breakdown-body");
 const chartCanvas = document.getElementById("category-chart");
+const syncStatusEl = document.getElementById("sync-status");
+const exportBtn = document.getElementById("export-btn");
+
+const filterSearchEl = document.getElementById("filter-search");
+const filterDateFromEl = document.getElementById("filter-date-from");
+const filterDateToEl = document.getElementById("filter-date-to");
+const filterCategoryEl = document.getElementById("filter-category");
+const filterCardEl = document.getElementById("filter-card");
+const filterClearBtn = document.getElementById("filter-clear");
 
 let categoryChart = null;
+let allExpenses = [];
+let lastSyncedAt = null;
+let categoryManuallySet = false;
 
 function categoryColor(category) {
   const varName = CATEGORY_COLOR_VAR[category] || "--cat-other";
@@ -44,18 +162,105 @@ function formatDate(dateStr) {
   });
 }
 
+// Whole-day difference between a "YYYY-MM-DD" expense date and today,
+// ignoring time-of-day so it lines up with how the date picker stores dates.
+function daysSince(dateStr) {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const txDate = new Date(year, month - 1, day);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  txDate.setHours(0, 0, 0, 0);
+  return Math.round((today - txDate) / 86400000);
+}
+
+function transactionStatus(dateStr) {
+  const age = daysSince(dateStr);
+  return age <= PENDING_WINDOW_DAYS ? "Pending" : "Posted";
+}
+
+// ---- Last synced indicator -------------------------------------------
+// Shows how long ago the data was last fetched, in words, and keeps that
+// wording fresh every 30s without re-fetching anything from the server.
+
+function formatRelativeTime(date) {
+  const seconds = Math.round((Date.now() - date.getTime()) / 1000);
+  if (seconds < 10) return "Synced just now";
+  if (seconds < 60) return `Synced ${seconds} seconds ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `Synced ${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  return `Synced ${hours} hour${hours === 1 ? "" : "s"} ago`;
+}
+
+function updateSyncStatus() {
+  if (!lastSyncedAt) return;
+  syncStatusEl.textContent = formatRelativeTime(lastSyncedAt);
+}
+
+function markSynced() {
+  lastSyncedAt = new Date();
+  updateSyncStatus();
+}
+
+setInterval(updateSyncStatus, 30000);
+
+// ---- Loading data -------------------------------------------------------
+
 async function loadCategories() {
   const res = await fetch(`${API_BASE}/categories`);
   const categories = await res.json();
   categorySelect.innerHTML = categories
     .map((c) => `<option value="${c}">${c}</option>`)
     .join("");
+  filterCategoryEl.insertAdjacentHTML(
+    "beforeend",
+    categories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")
+  );
 }
+
+async function loadCards() {
+  const res = await fetch(`${API_BASE}/cards`);
+  const cards = await res.json();
+  cardSelect.innerHTML = cards
+    .map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`)
+    .join("");
+  filterCardEl.insertAdjacentHTML(
+    "beforeend",
+    cards.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")
+  );
+  renderCardsList(cards);
+}
+
+// ---- Auto-categorize (add-expense form) ------------------------------
+// Once a card is selected and a merchant/note is typed, guess the category
+// from the same rules used for card sync, the way a bank auto-tags a new
+// transaction. A manual category change "wins" and stops further
+// auto-filling until the form is reset.
+
+function maybeAutoCategorize() {
+  if (categoryManuallySet) return;
+  const merchantText = noteInput.value.trim();
+  if (!cardSelect.value || !merchantText) return;
+
+  const match = categorizeMerchant(merchantText);
+  if (match) {
+    categorySelect.value = match;
+    autoCatHint.hidden = false;
+  }
+}
+
+noteInput.addEventListener("input", maybeAutoCategorize);
+cardSelect.addEventListener("change", maybeAutoCategorize);
+
+categorySelect.addEventListener("change", () => {
+  categoryManuallySet = true;
+  autoCatHint.hidden = true;
+});
 
 async function loadExpenses() {
   const res = await fetch(`${API_BASE}/expenses`);
-  const expenses = await res.json();
-  renderExpenseList(expenses);
+  allExpenses = await res.json();
+  applyFilters();
 }
 
 async function loadSummary() {
@@ -64,21 +269,71 @@ async function loadSummary() {
   renderSummary(summary);
 }
 
+// ---- Search & filter ------------------------------------------------
+
+function getFilteredExpenses() {
+  const query = filterSearchEl.value.trim().toLowerCase();
+  const dateFrom = filterDateFromEl.value;
+  const dateTo = filterDateToEl.value;
+  const category = filterCategoryEl.value;
+  const card = filterCardEl.value;
+
+  return allExpenses.filter((e) => {
+    if (query) {
+      const haystack = `${e.note || ""} ${e.category}`.toLowerCase();
+      if (!haystack.includes(query)) return false;
+    }
+    if (dateFrom && e.date < dateFrom) return false;
+    if (dateTo && e.date > dateTo) return false;
+    if (category && e.category !== category) return false;
+    if (card && e.card !== card) return false;
+    return true;
+  });
+}
+
+function applyFilters() {
+  const filtered = getFilteredExpenses();
+  renderExpenseList(filtered);
+}
+
+[filterSearchEl, filterDateFromEl, filterDateToEl, filterCategoryEl, filterCardEl].forEach((el) => {
+  el.addEventListener("input", applyFilters);
+});
+
+filterClearBtn.addEventListener("click", () => {
+  filterSearchEl.value = "";
+  filterDateFromEl.value = "";
+  filterDateToEl.value = "";
+  filterCategoryEl.value = "";
+  filterCardEl.value = "";
+  applyFilters();
+});
+
+// ---- Rendering ------------------------------------------------------
+
 function renderExpenseList(expenses) {
-  listEmptyEl.hidden = expenses.length > 0;
+  const hasAny = allExpenses.length > 0;
+  listEmptyEl.hidden = hasAny;
+  listNoMatchEl.hidden = !hasAny || expenses.length > 0;
+
   expenseListEl.innerHTML = expenses
-    .map(
-      (e) => `
+    .map((e) => {
+      const status = transactionStatus(e.date);
+      const badgeClass = status === "Pending" ? "badge-pending" : "badge-posted";
+      const icon = CATEGORY_ICON[e.category] || CATEGORY_ICON.Other;
+      return `
       <li class="expense-item">
-        <span class="cat-dot" style="background:${categoryColor(e.category)}"></span>
+        <span class="cat-icon" title="${e.category}" aria-hidden="true">${icon}</span>
         <span class="expense-amount">${formatCurrency(e.amount)}</span>
         <span class="expense-meta">
           <span class="note">${e.category}${e.note ? " — " + escapeHtml(e.note) : ""}</span>
+          <span class="expense-card">${escapeHtml(e.card || "Cash")}</span>
         </span>
+        <span class="status-badge ${badgeClass}">${status}</span>
         <span class="expense-date">${formatDate(e.date)}</span>
         <button class="delete-btn" data-id="${e.id}" aria-label="Delete expense">Delete</button>
-      </li>`
-    )
+      </li>`;
+    })
     .join("");
 }
 
@@ -169,6 +424,7 @@ function renderChart(byCategory) {
 
 async function refreshAll() {
   await Promise.all([loadExpenses(), loadSummary()]);
+  markSynced();
 }
 
 form.addEventListener("submit", async (event) => {
@@ -180,6 +436,7 @@ form.addEventListener("submit", async (event) => {
     category: form.category.value,
     date: form.date.value,
     note: form.note.value.trim() || null,
+    card: form.card.value,
   };
 
   const res = await fetch(`${API_BASE}/expenses`, {
@@ -197,7 +454,65 @@ form.addEventListener("submit", async (event) => {
 
   form.reset();
   dateInput.valueAsDate = new Date();
+  categoryManuallySet = false;
+  autoCatHint.hidden = true;
   await refreshAll();
+});
+
+// ---- Cards & "Simulate Card Sync" ------------------------------------
+
+function renderCardsList(cards) {
+  cardsListEl.innerHTML = cards
+    .map(
+      (c) => `
+      <li class="card-row">
+        <span class="card-name">${escapeHtml(c)}</span>
+        <span class="sync-msg" hidden></span>
+        <button type="button" class="sync-btn" data-card="${escapeHtml(c)}">Simulate Card Sync</button>
+      </li>`
+    )
+    .join("");
+}
+
+cardsListEl.addEventListener("click", async (event) => {
+  const btn = event.target.closest(".sync-btn");
+  if (!btn) return;
+
+  const card = btn.dataset.card;
+  const row = btn.closest(".card-row");
+  const msgEl = row.querySelector(".sync-msg");
+  const originalLabel = btn.textContent;
+
+  btn.disabled = true;
+  btn.textContent = "Syncing…";
+  msgEl.hidden = true;
+
+  const count = 3 + Math.floor(Math.random() * 3); // 3-5 new transactions
+  const today = todayDateStr();
+  let created = 0;
+
+  for (let i = 0; i < count; i++) {
+    const merchant = randomMerchant();
+    const category = categorizeMerchant(merchant.name) || "Other";
+    const amount = randomAmount(merchant.minAmount, merchant.maxAmount);
+
+    const res = await fetch(`${API_BASE}/expenses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount, category, date: today, note: merchant.name, card }),
+    });
+    if (res.ok) created++;
+  }
+
+  await refreshAll();
+
+  btn.disabled = false;
+  btn.textContent = originalLabel;
+  msgEl.textContent = `+${created} new transaction${created === 1 ? "" : "s"} synced`;
+  msgEl.hidden = false;
+  setTimeout(() => {
+    msgEl.hidden = true;
+  }, 5000);
 });
 
 expenseListEl.addEventListener("click", async (event) => {
@@ -214,12 +529,50 @@ expenseListEl.addEventListener("click", async (event) => {
   }
 });
 
+// ---- CSV export -------------------------------------------------------
+
+function csvEscape(value) {
+  const str = String(value ?? "");
+  if (/[",\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function buildCsv(expenses) {
+  const header = ["Date", "Category", "Note", "Card", "Status", "Amount"];
+  const rows = expenses.map((e) => [
+    e.date,
+    e.category,
+    e.note || "",
+    e.card || "Cash",
+    transactionStatus(e.date),
+    e.amount.toFixed(2),
+  ]);
+  return [header, ...rows].map((row) => row.map(csvEscape).join(",")).join("\r\n");
+}
+
+exportBtn.addEventListener("click", () => {
+  const filtered = getFilteredExpenses();
+  const csv = buildCsv(filtered);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const today = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `statement-${today}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   loadSummary();
 });
 
 (async function init() {
   dateInput.valueAsDate = new Date();
-  await loadCategories();
+  await Promise.all([loadCategories(), loadCards()]);
   await refreshAll();
 })();

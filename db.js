@@ -24,4 +24,14 @@ db.exec(`
   )
 `);
 
+// The "card" column was added after the table already existed in some
+// setups, so it's applied as a migration rather than in CREATE TABLE above.
+// SQLite has no "ADD COLUMN IF NOT EXISTS", so we just try it and ignore
+// the error if the column is already there.
+try {
+  db.exec("ALTER TABLE expenses ADD COLUMN card TEXT");
+} catch (err) {
+  if (!/duplicate column/i.test(err.message)) throw err;
+}
+
 module.exports = db;
