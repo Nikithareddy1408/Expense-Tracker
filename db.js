@@ -34,4 +34,19 @@ try {
   if (!/duplicate column/i.test(err.message)) throw err;
 }
 
+// The audit trail: one row per thing that happened to an expense (created,
+// auto-categorized, included in a summary calculation, exported). Kept in
+// its own table, separate from system-level server logs, so each expense's
+// journey can be looked up and shown on its own.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS expense_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    expense_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    source TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`);
+
 module.exports = db;

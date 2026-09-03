@@ -122,6 +122,10 @@ const noteInput = document.getElementById("note");
 const autoCatHint = document.getElementById("auto-cat-hint");
 const cardsListEl = document.getElementById("cards-list");
 const formError = document.getElementById("form-error");
+const historyDialog = document.getElementById("history-dialog");
+const historySubtitle = document.getElementById("history-subtitle");
+const historyTimeline = document.getElementById("history-timeline");
+const historyCloseBtn = document.getElementById("history-close");
 const totalSpendingEl = document.getElementById("total-spending");
 const expenseListEl = document.getElementById("expense-list");
 const listEmptyEl = document.getElementById("list-empty");
@@ -176,6 +180,20 @@ function daysSince(dateStr) {
 function transactionStatus(dateStr) {
   const age = daysSince(dateStr);
   return age <= PENDING_WINDOW_DAYS ? "Pending" : "Posted";
+}
+
+// SQLite's datetime('now') stores UTC as "YYYY-MM-DD HH:MM:SS" with no
+// timezone marker, so it has to be told it's UTC before parsing, or the
+// browser would read it as local time and skew every timestamp shown.
+function formatDateTime(sqliteTimestamp) {
+  const date = new Date(sqliteTimestamp.replace(" ", "T") + "Z");
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 // ---- Last synced indicator -------------------------------------------
@@ -331,6 +349,7 @@ function renderExpenseList(expenses) {
         </span>
         <span class="status-badge ${badgeClass}">${status}</span>
         <span class="expense-date">${formatDate(e.date)}</span>
+        <button class="history-btn" data-id="${e.id}" aria-label="View history" title="View history">🕘</button>
         <button class="delete-btn" data-id="${e.id}" aria-label="Delete expense">Delete</button>
       </li>`;
     })
@@ -437,6 +456,10 @@ form.addEventListener("submit", async (event) => {
     date: form.date.value,
     note: form.note.value.trim() || null,
     card: form.card.value,
+    source: "manual entry",
+    // The auto-cat hint is only visible when the current category value
+    // came from categorizeMerchant() and hasn't been overridden since.
+    autoCategorized: !autoCatHint.hidden,
   };
 
   const res = await fetch(`${API_BASE}/expenses`, {
@@ -499,7 +522,15 @@ cardsListEl.addEventListener("click", async (event) => {
     const res = await fetch(`${API_BASE}/expenses`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amount, category, date: today, note: merchant.name, card }),
+      body: JSON.stringify({
+        amount,
+        category,
+        date: today,
+        note: merchant.name,
+        card,
+        source: "card sync",
+        autoCategorized: true,
+      }),
     });
     if (res.ok) created++;
   }
@@ -516,18 +547,56 @@ cardsListEl.addEventListener("click", async (event) => {
 });
 
 expenseListEl.addEventListener("click", async (event) => {
-  const btn = event.target.closest(".delete-btn");
-  if (!btn) return;
+  const deleteBtn = event.target.closest(".delete-btn");
+  if (deleteBtn) {
+    const id = deleteBtn.dataset.id;
+    deleteBtn.disabled = true;
+    const res = await fetch(`${API_BASE}/expenses/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      await refreshAll();
+    } else {
+      deleteBtn.disabled = false;
+    }
+    return;
+  }
 
-  const id = btn.dataset.id;
-  btn.disabled = true;
-  const res = await fetch(`${API_BASE}/expenses/${id}`, { method: "DELETE" });
-  if (res.ok) {
-    await refreshAll();
-  } else {
-    btn.disabled = false;
+  const historyBtn = event.target.closest(".history-btn");
+  if (historyBtn) {
+    openHistory(Number(historyBtn.dataset.id));
   }
 });
+
+// ---- View history dialog ----------------------------------------------
+
+async function openHistory(id) {
+  const res = await fetch(`${API_BASE}/expenses/${id}/events`);
+  if (!res.ok) return;
+  const events = await res.json();
+
+  const expense = allExpenses.find((e) => e.id === id);
+  historySubtitle.textContent = expense
+    ? `${formatCurrency(expense.amount)} — ${expense.category}${expense.note ? " — " + expense.note : ""}`
+    : "";
+
+  historyTimeline.innerHTML = events.length
+    ? events
+        .map(
+          (ev) => `
+      <li class="history-event">
+        <span class="history-dot" aria-hidden="true"></span>
+        <div class="history-content">
+          <span class="history-label">${escapeHtml(ev.detail)}</span>
+          <span class="history-time">${formatDateTime(ev.created_at)}</span>
+        </div>
+      </li>`
+        )
+        .join("")
+    : '<li class="history-empty">No events recorded yet.</li>';
+
+  historyDialog.showModal();
+}
+
+historyCloseBtn.addEventListener("click", () => historyDialog.close());
 
 // ---- CSV export -------------------------------------------------------
 
@@ -552,8 +621,10 @@ function buildCsv(expenses) {
   return [header, ...rows].map((row) => row.map(csvEscape).join(",")).join("\r\n");
 }
 
-exportBtn.addEventListener("click", () => {
+exportBtn.addEventListener("click", async () => {
   const filtered = getFilteredExpenses();
+  if (filtered.length === 0) return;
+
   const csv = buildCsv(filtered);
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -565,6 +636,12 @@ exportBtn.addEventListener("click", () => {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+
+  await fetch(`${API_BASE}/expenses/export-log`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids: filtered.map((e) => e.id) }),
+  });
 });
 
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
